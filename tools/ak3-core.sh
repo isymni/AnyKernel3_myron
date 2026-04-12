@@ -37,6 +37,27 @@ contains() {
 file_getprop() {
   grep "^$2=" "$1" | tail -n1 | cut -d= -f2-;
 }
+find_slot_from_propfiles() {
+  local propdir propfile slot raw;
+  for propdir in / /system_root /system /vendor /product /product/etc /system_ext/etc /odm /odm/etc; do
+    for propfile in prop.default default.prop build.prop; do
+      slot="$(file_getprop "$propdir/$propfile" ro.boot.slot_suffix 2>/dev/null)";
+      [ "$slot" ] && break 2;
+    done;
+  done;
+  if [ ! "$slot" ]; then
+    for propdir in / /system_root /system /vendor /product /product/etc /system_ext/etc /odm /odm/etc; do
+      for propfile in prop.default default.prop build.prop; do
+        raw="$(file_getprop "$propdir/$propfile" ro.boot.slot 2>/dev/null)";
+        if [ "$raw" ]; then
+          slot="_$raw";
+          break 2;
+        fi;
+      done;
+    done;
+  fi;
+  [ "$slot" ] && echo "$slot";
+}
 ###
 
 ### file/directory attributes functions:
@@ -811,13 +832,22 @@ setup_ak() {
   # slot detection enabled by is_slot_device=1 or auto (from anykernel.sh)
   case $is_slot_device in
     1|auto)
-      slot=$(getprop ro.boot.slot_suffix 2>/dev/null);
+      if [ -f /tmp/ak3-slot-compat.env ]; then
+        . /tmp/ak3-slot-compat.env 2>/dev/null
+        if [ "$ACTIVE_SLOT_SUFFIX" ]; then
+          slot="$ACTIVE_SLOT_SUFFIX";
+        elif [ "$ACTIVE_SLOT" ]; then
+          slot="_$ACTIVE_SLOT";
+        fi;
+      fi;
+      [ "$slot" ] || slot=$(getprop ro.boot.slot_suffix 2>/dev/null);
       [ "$slot" ] || slot=$(grep -o 'androidboot.slot_suffix=.*$' /proc/cmdline | cut -d\  -f1 | cut -d= -f2);
       if [ ! "$slot" ]; then
         slot=$(getprop ro.boot.slot 2>/dev/null);
         [ "$slot" ] || slot=$(grep -o 'androidboot.slot=.*$' /proc/cmdline | cut -d\  -f1 | cut -d= -f2);
         [ "$slot" ] && slot=_$slot;
       fi;
+      [ "$slot" ] || slot=$(find_slot_from_propfiles);
       [ "$slot" == "normal" ] && unset slot;
       if [ "$slot" ]; then
         if [ -d /postinstall/tmp -a ! "$slot_select" ]; then

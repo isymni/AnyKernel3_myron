@@ -33,7 +33,39 @@ ui_printfile() {
 }
 show_progress() { echo "progress $1 $2" >> /proc/self/fd/$OUTFD; }
 file_getprop() { grep "^$2=" "$1" | tail -n1 | cut -d= -f2-; }
+find_slot_from_propfiles() {
+  local propdir propfile slot raw;
+  for propdir in / /system_root /system /vendor /product /product/etc /system_ext/etc /odm /odm/etc; do
+    for propfile in prop.default default.prop build.prop; do
+      slot="$(file_getprop "$propdir/$propfile" ro.boot.slot_suffix 2>/dev/null)";
+      [ "$slot" ] && break 2;
+    done;
+  done;
+  if [ ! "$slot" ]; then
+    for propdir in / /system_root /system /vendor /product /product/etc /system_ext/etc /odm /odm/etc; do
+      for propfile in prop.default default.prop build.prop; do
+        raw="$(file_getprop "$propdir/$propfile" ro.boot.slot 2>/dev/null)";
+        if [ "$raw" ]; then
+          slot="_$raw";
+          break 2;
+        fi;
+      done;
+    done;
+  fi;
+  [ "$slot" ] && echo "$slot";
+}
 find_slot() {
+  if [ -f /tmp/ak3-slot-compat.env ]; then
+    . /tmp/ak3-slot-compat.env 2>/dev/null
+    if [ "$ACTIVE_SLOT_SUFFIX" ]; then
+      echo "$ACTIVE_SLOT_SUFFIX"
+      return 0
+    fi
+    if [ "$ACTIVE_SLOT" ]; then
+      echo "_$ACTIVE_SLOT"
+      return 0
+    fi
+  fi
   local slot=$(getprop ro.boot.slot_suffix 2>/dev/null);
   [ "$slot" ] || slot=$(grep -o 'androidboot.slot_suffix=.*$' /proc/cmdline | cut -d\  -f1 | cut -d= -f2);
   if [ ! "$slot" ]; then
@@ -41,6 +73,7 @@ find_slot() {
     [ "$slot" ] || slot=$(grep -o 'androidboot.slot=.*$' /proc/cmdline | cut -d\  -f1 | cut -d= -f2);
     [ "$slot" ] && slot=_$slot;
   fi;
+  [ "$slot" ] || slot=$(find_slot_from_propfiles);
   [ "$slot" == "normal" ] && unset slot;
   [ "$slot" ] && echo "$slot";
 }
@@ -209,7 +242,7 @@ setup_env() {
     getprop() {
       local propdir propfile propval;
       for propdir in / /system_root /system /vendor /product /product/etc /system_ext/etc /odm/etc; do
-        for propfile in default.prop build.prop; do
+        for propfile in prop.default default.prop build.prop; do
           if [ "$propval" ]; then
             break 2;
           else
